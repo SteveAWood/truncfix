@@ -6,20 +6,16 @@ const redis = new Redis(process.env.REDIS_URL || 'redis://127.0.0.1:6379', {
   lazyConnect: true,
 });
 
-// Prevent unhandled errors from crashing the process
-redis.on('error', () => {
-  // Fail open – we don't want Redis issues to take the site down
-});
+// Prevent Redis errors from crashing the process
+redis.on('error', () => {});
 
 interface RateLimitResult {
   success: boolean;
   remaining: number;
-  reset: number;
 }
 
 /**
  * Simple fixed-window rate limiter.
- * Returns success: false when the limit is exceeded.
  * Fails open (allows the request) if Redis is unavailable.
  */
 export async function rateLimit(
@@ -32,26 +28,22 @@ export async function rateLimit(
       await redis.connect().catch(() => null);
     }
 
-    const redisKey = `rl:truncfix:${key}`;
     const now = Math.floor(Date.now() / 1000);
-    const windowKey = `${redisKey}:${Math.floor(now / windowSeconds)}`;
+    const window = Math.floor(now / windowSeconds);
+    const redisKey = `rl:truncfix:${key}:${window}`;
 
-    const count = await redis.incr(windowKey);
+    const count = await redis.incr(redisKey);
 
     if (count === 1) {
-      await redis.expire(windowKey, windowSeconds);
+      await redis.expire(redisKey, windowSeconds);
     }
-
-    const remaining = Math.max(0, limit - count);
-    const reset = (Math.floor(now / windowSeconds) + 1) * windowSeconds;
 
     return {
       success: count <= limit,
-      remaining,
-      reset,
+      remaining: Math.max(0, limit - count),
     };
   } catch {
-    // Fail open
-    return { success: true, remaining: limit, reset: 0 };
+    // Fail open – never take the site down because of Redis
+    return { success: true, remaining: limit };
   }
 }
