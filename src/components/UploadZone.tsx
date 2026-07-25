@@ -22,13 +22,18 @@ const ACCEPTED_EXTENSIONS = [
   '.json',
 ];
 
+const MAX_BYTES = 200 * 1024 * 1024; // 200 MB hard ceiling
+const WARN_BYTES = 50 * 1024 * 1024; // warn above 50 MB
+
 export default function UploadZone({ onFileLoaded, isLoading }: Props) {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
 
   const processFile = useCallback(
     async (file: File) => {
       setError(null);
+      setWarning(null);
 
       const lower = file.name.toLowerCase();
       const ok = ACCEPTED_EXTENSIONS.some((ext) => lower.endsWith(ext));
@@ -39,9 +44,17 @@ export default function UploadZone({ onFileLoaded, isLoading }: Props) {
         return;
       }
 
-      if (file.size > 50 * 1024 * 1024) {
-        setError('File is too large (max 50 MB).');
+      if (file.size > MAX_BYTES) {
+        setError(
+          `File is too large (max ${Math.round(MAX_BYTES / 1024 / 1024)} MB). Try splitting it first or exporting a smaller range.`
+        );
         return;
+      }
+
+      if (file.size > WARN_BYTES) {
+        setWarning(
+          `Large file (${(file.size / 1024 / 1024).toFixed(0)} MB). Processing stays in your browser and may use a lot of memory — keep this tab focused until it finishes.`
+        );
       }
 
       try {
@@ -120,6 +133,9 @@ export default function UploadZone({ onFileLoaded, isLoading }: Props) {
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
             Repomix, Markdown, TXT, logs, DOCX, WhatsApp, Discord, Slack, Telegram
           </p>
+          <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+            Max 200 MB · processing stays in your browser
+          </p>
         </div>
 
         <label className="mt-2">
@@ -137,6 +153,12 @@ export default function UploadZone({ onFileLoaded, isLoading }: Props) {
           </span>
         </label>
       </div>
+
+      {warning && !error && (
+        <p className="mt-4 text-sm text-amber-700 dark:text-amber-400 font-medium">
+          {warning}
+        </p>
+      )}
 
       {error && (
         <p className="mt-4 text-sm text-rose-600 dark:text-rose-400 font-medium">
