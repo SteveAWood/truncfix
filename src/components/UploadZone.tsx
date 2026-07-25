@@ -3,7 +3,12 @@
 import { useCallback, useState } from 'react';
 
 interface Props {
-  onFileLoaded: (content: string, fileName: string, file?: File) => void;
+  onFileLoaded: (payload: {
+    content?: string;
+    arrayBuffer?: ArrayBuffer;
+    fileName: string;
+    isBinary: boolean;
+  }) => void;
   isLoading: boolean;
 }
 
@@ -29,28 +34,33 @@ export default function UploadZone({ onFileLoaded, isLoading }: Props) {
       const ok = ACCEPTED_EXTENSIONS.some((ext) => lower.endsWith(ext));
       if (!ok) {
         setError(
-          'Supported formats: .xml (Repomix), .txt, .md, .log, .docx, and common chat exports (.json).'
+          'Supported formats: .xml (Repomix), .txt, .md, .log, .docx, and chat exports (.json / WhatsApp .txt).'
         );
         return;
       }
 
-      // 50 MB hard cap for browser safety
       if (file.size > 50 * 1024 * 1024) {
         setError('File is too large (max 50 MB).');
         return;
       }
 
       try {
-        // DOCX needs special handling later (mammoth). For now we only accept text-readable files.
         if (lower.endsWith('.docx')) {
-          setError(
-            'DOCX support is being added next. For now please export as .txt or .md, or wait for the next update.'
-          );
+          const arrayBuffer = await file.arrayBuffer();
+          onFileLoaded({
+            arrayBuffer,
+            fileName: file.name,
+            isBinary: true,
+          });
           return;
         }
 
         const text = await file.text();
-        onFileLoaded(text, file.name, file);
+        onFileLoaded({
+          content: text,
+          fileName: file.name,
+          isBinary: false,
+        });
       } catch {
         setError('Failed to read file.');
       }
@@ -108,7 +118,7 @@ export default function UploadZone({ onFileLoaded, isLoading }: Props) {
             Drop a large file here
           </p>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Repomix XML, Markdown, TXT, logs, or chat exports
+            Repomix, Markdown, TXT, logs, DOCX, WhatsApp, Discord, Slack, Telegram
           </p>
         </div>
 

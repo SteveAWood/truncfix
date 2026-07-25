@@ -5,7 +5,7 @@ import Header from '@/components/Header';
 import UploadZone from '@/components/UploadZone';
 import LimitSlider from '@/components/LimitSlider';
 import StatsPanel from '@/components/StatsPanel';
-import { parseFile } from '@/lib/parsers';
+import { parseFile, parseBinaryFile } from '@/lib/parsers';
 import { splitFiles, groupIntoBatches, estimateZipSize } from '@/lib/splitter';
 import { createBatchedZipBlob } from '@/lib/zip';
 import { estimateTokens } from '@/lib/tokens';
@@ -24,13 +24,26 @@ export default function HomePage() {
   >('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const handleFileLoaded = (content: string, name: string) => {
+  const handleFileLoaded = async (payload: {
+    content?: string;
+    arrayBuffer?: ArrayBuffer;
+    fileName: string;
+    isBinary: boolean;
+  }) => {
     setIsProcessing(true);
     setErrorMsg(null);
     setStatus('idle');
 
     try {
-      const result = parseFile(content, name);
+      let result: ParseResult;
+
+      if (payload.isBinary && payload.arrayBuffer) {
+        result = await parseBinaryFile(payload.arrayBuffer, payload.fileName);
+      } else if (payload.content) {
+        result = parseFile(payload.content, payload.fileName);
+      } else {
+        throw new Error('No file content');
+      }
 
       if (result.fileCount === 0) {
         setErrorMsg(
@@ -42,7 +55,7 @@ export default function HomePage() {
         return;
       }
 
-      setFileName(name);
+      setFileName(payload.fileName);
       setParseResult(result);
       setStatus('ready');
 
@@ -53,7 +66,8 @@ export default function HomePage() {
         originalFiles: result.fileCount,
         detectedType: result.detectedType,
       });
-    } catch {
+    } catch (err) {
+      console.error(err);
       setErrorMsg('Failed to parse file.');
       setStatus('error');
     } finally {

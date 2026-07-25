@@ -2,10 +2,15 @@ import { FileType, ParseResult } from '@/types';
 import { detectFileType } from '../detect';
 import { parseRepomix } from './repomix';
 import { parsePlainText } from './plain';
+import { parseWhatsApp } from './whatsapp';
+import { parseDiscord } from './discord';
+import { parseSlack } from './slack';
+import { parseTelegram } from './telegram';
+import { parseDocx } from './docx';
 
 /**
- * Main entry point. Detects type and dispatches to the correct parser.
- * Always returns a ParseResult so the rest of the pipeline stays uniform.
+ * Main entry for text-based files.
+ * Detects type and dispatches to the correct parser.
  */
 export function parseFile(content: string, filename: string): ParseResult {
   const detected = detectFileType(filename, content);
@@ -23,22 +28,49 @@ export function parseFile(content: string, filename: string): ParseResult {
     case 'plain':
       return parsePlainText(content, filename, 'plain');
 
-    // Phase 2+ placeholders – fall back to plain text for now
     case 'whatsapp':
+      return parseWhatsApp(content, filename);
+
     case 'discord':
+      return parseDiscord(content, filename);
+
     case 'slack':
+      return parseSlack(content, filename);
+
     case 'telegram':
+      return parseTelegram(content, filename);
+
     case 'imessage':
+      // Best-effort: treat as plain text for now
+      return {
+        ...parsePlainText(content, filename, 'plain'),
+        detectedType: 'imessage',
+      };
+
     case 'docx':
     case 'unknown':
     default:
-      // For now treat unknown / not-yet-implemented as plain text
-      // so the user still gets a usable split.
       return {
         ...parsePlainText(content, filename, 'plain'),
         detectedType: detected,
       };
   }
+}
+
+/**
+ * Async entry for binary formats (DOCX).
+ */
+export async function parseBinaryFile(
+  arrayBuffer: ArrayBuffer,
+  filename: string
+): Promise<ParseResult> {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith('.docx')) {
+    return parseDocx(arrayBuffer, filename);
+  }
+  // Fallback: decode as text
+  const text = new TextDecoder('utf-8', { fatal: false }).decode(arrayBuffer);
+  return parseFile(text, filename);
 }
 
 export type { FileType, ParseResult };
