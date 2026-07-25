@@ -3,20 +3,34 @@
 import { useCallback, useState } from 'react';
 
 interface Props {
-  onFileLoaded: (content: string, fileName: string) => void;
+  onFileLoaded: (content: string, fileName: string, file?: File) => void;
   isLoading: boolean;
 }
+
+const ACCEPTED_EXTENSIONS = [
+  '.xml',
+  '.txt',
+  '.md',
+  '.markdown',
+  '.log',
+  '.docx',
+  '.json',
+];
 
 export default function UploadZone({ onFileLoaded, isLoading }: Props) {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const processFile = useCallback(
-    (file: File) => {
+    async (file: File) => {
       setError(null);
 
-      if (!file.name.endsWith('.xml') && !file.name.endsWith('.txt')) {
-        setError('Please upload a Repomix-style .xml file.');
+      const lower = file.name.toLowerCase();
+      const ok = ACCEPTED_EXTENSIONS.some((ext) => lower.endsWith(ext));
+      if (!ok) {
+        setError(
+          'Supported formats: .xml (Repomix), .txt, .md, .log, .docx, and common chat exports (.json).'
+        );
         return;
       }
 
@@ -26,13 +40,20 @@ export default function UploadZone({ onFileLoaded, isLoading }: Props) {
         return;
       }
 
-      const reader = new FileReader();
-      reader.onload = () => {
-        const text = reader.result as string;
-        onFileLoaded(text, file.name);
-      };
-      reader.onerror = () => setError('Failed to read file.');
-      reader.readAsText(file);
+      try {
+        // DOCX needs special handling later (mammoth). For now we only accept text-readable files.
+        if (lower.endsWith('.docx')) {
+          setError(
+            'DOCX support is being added next. For now please export as .txt or .md, or wait for the next update.'
+          );
+          return;
+        }
+
+        const text = await file.text();
+        onFileLoaded(text, file.name, file);
+      } catch {
+        setError('Failed to read file.');
+      }
     },
     [onFileLoaded]
   );
@@ -57,33 +78,44 @@ export default function UploadZone({ onFileLoaded, isLoading }: Props) {
       onDrop={onDrop}
       className={`
         relative rounded-2xl border-2 border-dashed p-10 text-center transition-all
-        ${isDragging
-          ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/30'
-          : 'border-slate-300 dark:border-slate-700 hover:border-teal-400 dark:hover:border-teal-600'
+        ${
+          isDragging
+            ? 'border-teal-500 bg-teal-50 dark:bg-teal-950/30'
+            : 'border-slate-300 dark:border-slate-700 hover:border-teal-400 dark:hover:border-teal-600'
         }
         ${isLoading ? 'opacity-60 pointer-events-none' : ''}
       `}
     >
       <div className="flex flex-col items-center gap-3">
         <div className="w-14 h-14 rounded-2xl bg-teal-100 dark:bg-teal-900/40 flex items-center justify-center">
-          <svg className="w-7 h-7 text-teal-600 dark:text-teal-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+          <svg
+            className="w-7 h-7 text-teal-600 dark:text-teal-400"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.5}
+              d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
+            />
           </svg>
         </div>
 
         <div>
           <p className="text-base font-medium text-slate-800 dark:text-slate-200">
-            Drop your Repomix XML file here
+            Drop a large file here
           </p>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            or click to browse
+            Repomix XML, Markdown, TXT, logs, or chat exports
           </p>
         </div>
 
         <label className="mt-2">
           <input
             type="file"
-            accept=".xml,.txt"
+            accept=".xml,.txt,.md,.markdown,.log,.docx,.json"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];

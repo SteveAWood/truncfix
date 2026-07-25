@@ -5,9 +5,10 @@ import Header from '@/components/Header';
 import UploadZone from '@/components/UploadZone';
 import LimitSlider from '@/components/LimitSlider';
 import StatsPanel from '@/components/StatsPanel';
-import { parseRepomixXml } from '@/lib/parser';
-import { splitFiles, estimateZipSize } from '@/lib/splitter';
-import { createZipBlob } from '@/lib/zip';
+import { parseFile } from '@/lib/parsers';
+import { splitFiles, groupIntoBatches, estimateZipSize } from '@/lib/splitter';
+import { createBatchedZipBlob } from '@/lib/zip';
+import { estimateTokens } from '@/lib/tokens';
 import { logUsage } from '@/lib/logger';
 import { ParseResult } from '@/types';
 
@@ -15,9 +16,12 @@ export default function HomePage() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
   const [characterLimit, setCharacterLimit] = useState(55000);
+  const [maxTokensPerZip, setMaxTokensPerZip] = useState(200000);
   const [allowExceed, setAllowExceed] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'ready' | 'splitting' | 'done' | 'error'>('idle');
+  const [status, setStatus] = useState<
+    'idle' | 'ready' | 'splitting' | 'done' | 'error'
+  >('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleFileLoaded = (content: string, name: string) => {
@@ -26,10 +30,12 @@ export default function HomePage() {
     setStatus('idle');
 
     try {
-      const result = parseRepomixXml(content);
+      const result = parseFile(content, name);
 
       if (result.fileCount === 0) {
-        setErrorMsg('No <file path="..."> blocks found. Is this a valid Repomix XML file?');
+        setErrorMsg(
+          'Could not extract any content blocks from this file. Try a different format.'
+        );
         setParseResult(null);
         setFileName(null);
         setStatus('error');
@@ -45,6 +51,7 @@ export default function HomePage() {
         event: 'upload',
         originalChars: result.totalChars,
         originalFiles: result.fileCount,
+        detectedType: result.detectedType,
       });
     } catch {
       setErrorMsg('Failed to parse file.');
@@ -62,37 +69,49 @@ export default function HomePage() {
       allowExceedForLargeFiles: allowExceed,
     });
 
-    const readmeChars = 1200;
+    const batches = groupIntoBatches(parts, maxTokensPerZip);
+    const totalChars = parseResult.totalChars;
+    const estimatedTokens = estimateTokens(totalChars);
+    const readmeChars = 2000 + batches.length * 800;
     const zipBytes = estimateZipSize(parts, readmeChars);
-    const hasOversized = parseResult.files.some(f => f.charCount > characterLimit);
+    const hasOversized = parseResult.files.some(
+      (f) => f.charCount > characterLimit
+    );
 
     return {
       parts,
+      batches,
       estimatedParts: parts.length,
+      estimatedBatches: batches.length,
+      estimatedTokens,
       estimatedZipBytes: zipBytes,
       hasOversizedFiles: hasOversized,
     };
-  }, [parseResult, characterLimit, allowExceed]);
+  }, [parseResult, characterLimit, maxTokensPerZip, allowExceed]);
 
   const handleSplitAndDownload = async () => {
-    if (!parseResult || !estimate) return;
+    if (!parseResult || !estimate || !fileName) return;
 
     setStatus('splitting');
     setErrorMsg(null);
 
     try {
-      const blob = await createZipBlob(
-        estimate.parts,
+      const blob = await createBatchedZipBlob(
+        estimate.batches,
         characterLimit,
+        maxTokensPerZip,
         parseResult.fileCount,
         parseResult.totalChars,
-        allowExceed
+        allowExceed,
+        parseResult.detectedType,
+        fileName
       );
 
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `truncfix-${fileName?.replace(/\\.xml$/i, '') || 'split'}.zip`;
+      const base = fileName.replace(/\.[^.]+$/i, '');
+      a.download = `truncfix-${base}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -106,9 +125,13 @@ export default function HomePage() {
         originalChars: parseResult.totalChars,
         originalFiles: parseResult.fileCount,
         characterLimit,
+        maxTokensPerZip,
         allowExceed,
         partsCreated: estimate.parts.length,
+        batchesCreated: estimate.batches.length,
+        estimatedTokens: estimate.estimatedTokens,
         zipSizeEstimate: estimate.estimatedZipBytes,
+        detectedType: parseResult.detectedType,
       });
     } catch (err) {
       console.error(err);
@@ -124,10 +147,11 @@ export default function HomePage() {
       <main className="mx-auto max-w-5xl px-4 sm:px-6 py-10 space-y-8">
         <div className="text-center max-w-2xl mx-auto mb-4">
           <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900 dark:text-white">
-            Stop losing code to truncation
+            Stop losing context to truncation
           </h2>
           <p className="mt-3 text-slate-600 dark:text-slate-400 text-lg">
-            Upload a large Repomix file. Choose a safe character limit. Download a clean zip of perfectly sized parts.
+            Upload large code dumps, documents, or chat logs. Choose safe size limits.
+            Download clean, batch-ready parts for AI conversations.
           </p>
         </div>
 
@@ -143,17 +167,23 @@ export default function HomePage() {
           <>
             <StatsPanel
               fileName={fileName}
+              detectedType={parseResult.detectedType}
               totalChars={parseResult.totalChars}
               fileCount={parseResult.fileCount}
               estimatedParts={estimate.estimatedParts}
+              estimatedBatches={estimate.estimatedBatches}
+              estimatedTokens={estimate.estimatedTokens}
               estimatedZipBytes={estimate.estimatedZipBytes}
               hasOversizedFiles={estimate.hasOversizedFiles}
+              maxTokensPerZip={maxTokensPerZip}
             />
 
             <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
               <LimitSlider
-                value={characterLimit}
-                onChange={setCharacterLimit}
+                characterLimit={characterLimit}
+                onCharacterLimitChange={setCharacterLimit}
+                maxTokensPerZip={maxTokensPerZip}
+                onMaxTokensChange={setMaxTokensPerZip}
                 allowExceed={allowExceed}
                 onAllowExceedChange={setAllowExceed}
               />
@@ -163,7 +193,11 @@ export default function HomePage() {
               <p className="text-sm text-slate-500 dark:text-slate-400">
                 {status === 'done'
                   ? 'Zip downloaded successfully.'
-                  : `Ready to create ${estimate.estimatedParts} part${estimate.estimatedParts === 1 ? '' : 's'}.`}
+                  : `Ready: ${estimate.estimatedParts} part${
+                      estimate.estimatedParts === 1 ? '' : 's'
+                    } in ${estimate.estimatedBatches} batch${
+                      estimate.estimatedBatches === 1 ? '' : 'es'
+                    } (~${estimate.estimatedTokens.toLocaleString()} tokens).`}
               </p>
 
               <button
@@ -171,15 +205,19 @@ export default function HomePage() {
                 disabled={status === 'splitting'}
                 className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white font-semibold shadow-sm transition-colors"
               >
-                {status === 'splitting' ? 'Creating zip…' : `Download Zip (${estimate.estimatedParts} parts)`}
+                {status === 'splitting'
+                  ? 'Creating zip…'
+                  : `Download Zip (${estimate.estimatedBatches} batch${
+                      estimate.estimatedBatches === 1 ? '' : 'es'
+                    })`}
               </button>
             </div>
           </>
         )}
 
         <p className="text-center text-xs text-slate-400 dark:text-slate-600 pt-8">
-          truncfix runs entirely in your browser. Files are never uploaded to a server for processing.
-          Only anonymous usage metrics are logged.
+          truncfix runs entirely in your browser. Files are never uploaded to a server
+          for processing. Only anonymous usage metrics are logged.
         </p>
       </main>
     </div>
