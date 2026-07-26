@@ -202,7 +202,7 @@ export function partToText(
 
   // Plain / markdown / log / chat style
   const body = part.files
-    .map((f) => `===== ${f.path} =====\n${f.content}`)
+    .map((f) => `== ${f.path} ==\n${f.content}`)
     .join('\n\n');
   return `${header}\n${body}\n`;
 }
